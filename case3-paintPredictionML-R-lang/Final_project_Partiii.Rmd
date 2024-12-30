@@ -1,0 +1,832 @@
+---
+title: "Final_Project_part iii+part iv"
+author: "Miranda Chen"
+---
+```{r}
+library(tidyverse)
+library(coefplot)
+library(gridExtra)
+library(caret)
+library(iterators)
+library(parallel)
+library(doParallel)
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r}
+dfiiiA <- df %>% 
+  select(-response)
+
+dfiiiA %>% glimpse()
+```
+
+```{r}
+standardize <- function(x) {
+  return ((x - mean(x)) / sd(x))
+}
+
+
+dfiiiA_standard <- dfiiiA
+# Apply the function to the variables
+dfiiiA_standard$R <- standardize(dfiiiA$R)
+dfiiiA_standard$G <- standardize(dfiiiA$G)
+dfiiiA_standard$B <- standardize(dfiiiA$B)
+dfiiiA_standard$Hue <- standardize(dfiiiA$Hue)
+
+dfiiiA_standard %>% glimpse()
+```
+##Part iii: Classification - iiiA) GLM
+#A1: Intercept-only model – no INPUTS  
+```{r}
+modA <- glm(outcome ~ 1, data = dfiiiA_standard, family = binomial)
+#modA %>% summary()
+```
+#A2: Categorical variables only – linear additive 
+```{r}
+modB <- glm(outcome ~ Lightness + Saturation, data = dfiiiA_standard, family = binomial)
+```
+#A3: Continuous variables only – linear additive
+```{r}
+modC <- glm(outcome ~ R + G + B + Hue, data = dfiiiA_standard, family = binomial)
+```
+#A4: Linear additive features using all inputs (categorical and continuous) 
+```{r}
+modD <- glm(outcome ~ ., data = dfiiiA_standard, family = binomial)
+```
+#A5: Interact the categorical input with the main continuous inputs 
+```{r}
+modE <- glm(outcome ~ (Lightness + Saturation) * ( R + G + B + Hue), data = dfiiiA_standard, family = binomial)
+```
+#A6: Add the categorical input to linear main effects and all pairwise interaction of the continuous inputs 
+```{r}
+modF <- glm(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2, data = dfiiiA_standard, family = binomial)
+```
+#A7: Interaction of the categorical input with all main effect and all pairwise interaction of the continuous inputs
+```{r}
+modG <- glm(outcome ~ (Lightness + Saturation) * ( R + G + B + Hue)^2, data = dfiiiA_standard, family = binomial)
+```
+#A8: Try non-linear basis functions based on your EDA.
+```{r}
+modH <- glm(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), data = dfiiiA_standard, family = binomial)
+```
+
+#A9: Can consider interactions of basis functions with other basis functions!
+```{r}
+modI <- glm(outcome ~ Lightness + Saturation + R*G*B*Hue, data = dfiiiA_standard, family = binomial)
+```
+
+#A10:Can consider interactions of basis functions with the categorical inputs!
+```{r}
+modJ <- glm(outcome ~ (Lightness + Saturation) * R*G*B*Hue, data = dfiiiA_standard, family = binomial)
+```
+#A11:Did you experience any issues or warnings while fitting the generalized linear models?**
+
+Yes. It shows a warning that glm.fit: fitting possibility is 0 or 1 occurred.
+
+#A12:What performance metric did you use to make your selection?
+```{r}
+modA %>% broom::glance()
+```
+
+```{r}
+modB %>% broom::glance()
+modC %>% broom::glance()
+modD %>% broom::glance()
+modE %>% broom::glance()
+modF %>% broom::glance()
+modG %>% broom::glance()
+modH %>% broom::glance()
+modI %>% broom::glance()
+modJ %>% broom::glance()
+
+```
+```{r}
+
+bic_values <- c(
+  BIC(modA),
+  BIC(modB),
+  BIC(modC),
+  BIC(modD),
+  BIC(modE),
+  BIC(modF),
+  BIC(modG),
+  BIC(modH),
+  BIC(modI),
+  BIC(modJ)
+)
+
+names(bic_values) <- c("modA", "modB", "modC", "modD", "modE", "modF", "modG", "modH", "modI", "modJ")
+
+# Find the model with the lowest BIC
+best_model_name <- names(bic_values)[which.min(bic_values)]
+best_bic_value <- min(bic_values)
+
+# Print out the best model
+best_model_name
+best_bic_value
+
+```
+#A13:Visualize the coefficient summaries for your top 3 models.
+```{r}
+
+# Get the summary of the model
+summary_modI <- summary(modI)
+summary_modH <- summary(modH)
+summary_modF <- summary(modF)
+
+# Extract coefficients
+coef_modI <- summary_modI$coefficients
+coef_modH <- summary_modH$coefficients
+coef_modF <- summary_modF$coefficients
+```
+
+
+```{r}
+df_coef <- rbind(
+  data.frame(term = rownames(coef_modI), estimate = coef_modI[, "Estimate"], std_error = coef_modI[, "Std. Error"], model = "modI"),
+  data.frame(term = rownames(coef_modH), estimate = coef_modH[, "Estimate"], std_error = coef_modH[, "Std. Error"], model = "modH"),
+  data.frame(term = rownames(coef_modF), estimate = coef_modF[, "Estimate"], std_error = coef_modF[, "Std. Error"], model = "modF")
+)
+```
+
+
+```{r}
+# Calculate confidence intervals
+df_coef$CI_lower <- df_coef$estimate - 1.96 * df_coef$std_error
+df_coef$CI_upper <- df_coef$estimate + 1.96 * df_coef$std_error
+```
+
+```{r}
+# Plotting
+ggplot(df_coef, aes(x = term, y = estimate, ymin = CI_lower, ymax = CI_upper, colour = model)) +
+  geom_pointrange() +
+  theme_minimal() +
+  labs(title = "Coefficient Estimates with 95% CIs") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()  # Flip coordinates for horizontal layout
+
+```
+ it seems that certain levels of "Saturation" (like "Saturationmuted", "Saturationneutral", etc.), "Lightness" levels (like "Lightnessdeep", "Lightnessslight", etc.), and some of the interaction terms (like "R:G", "R:B:Hue", "R:G:Hue", etc.) have coefficients that are notably different from zero, which suggests they are important in predicting the outcome.
+
+##Part iii: Classification – iiiB) Bayesian GLM
+#B1: Fit 2 Bayesian generalized linear models – one must be the best model from iiiA) and the second must be another model you fit in iiiA).
+
+model I, the best model 
+model H, the second best model
+
+#B2: You may use the Laplace Approximation approach we used in lecture and the homework assignments.
+```{r}
+Xmat_I <- model.matrix(outcome ~ Lightness + Saturation + R*G*B*Hue, data = dfiiiA_standard)
+Xmat_H <- model.matrix(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), data = dfiiiA_standard)
+
+```
+
+use a prior mean of 0 and a prior standard deviation of 4.5.
+```{r}
+info_I <- list(
+  yobs = dfiiiA_standard$outcome,
+  design_matrix = Xmat_I,
+  mu_beta = 0,
+  tau_beta = 4.5 
+)
+
+info_H <- list(
+  yobs = dfiiiA_standard$outcome,
+  design_matrix = Xmat_H,
+  mu_beta = 0,
+  tau_beta = 4.5 
+)
+```
+
+```{r}
+logistic_logpost <- function(unknowns, my_info)
+{
+  X <- my_info$design_matrix
+  eta <- X %*% unknowns
+  mu <- boot::inv.logit(eta)
+  # evaluate the log-likelihood
+  log_lik <- sum(dbinom(x = my_info$yobs, size = 1, prob = mu, log = TRUE ))
+  # evaluate the log-prior
+  log_prior <- sum(dnorm(x = unknowns, mean = my_info$mu_beta, sd = my_info$tau_beta, log = TRUE ))
+  # sum together
+  log_lik + log_prior
+}
+```
+Now define the my_laplace() function.
+
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 5001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+Perform the Laplace Approximation for 2 models with an initial guess of zero for all unknowns for each model.
+```{r}
+laplace_I <- my_laplace(rep(0,ncol(Xmat_I)), logistic_logpost, info_I )
+
+laplace_H <- my_laplace(rep(0,ncol(Xmat_H)), logistic_logpost, info_H )
+```
+
+We have trained 2 Bayesian logistic regression models. Now, it is to identify the best using the Evidence based approach.
+
+Calculate the posterior model weight associated with each of the 2 models. Create a histogram that shows the posterior model weight for each model.
+```{r}
+evidence_laplace <- tibble::tibble( model = c('H', 'I'))
+
+evidence_laplace <- evidence_laplace %>% mutate( evidence = exp(c(laplace_H$log_evidence, 
+                      laplace_I$log_evidence)))
+
+evidence_laplace <- evidence_laplace %>% mutate(weight = evidence/sum(evidence))
+
+evidence_laplace %>% ggplot(aes(x = model, y = weight)) + geom_histogram(stat = "identity")
+
+```
+ model H is the best model
+ 
+#B3:Visualize the regression coefficient posterior summary statistics for your best model.
+```{r}
+laplace_H %>% glimpse()
+```
+
+```{r}
+viz_post_coefs <- function(post_means, post_sds, xnames)
+{
+  tibble::tibble(
+    mu = post_means,
+    sd = post_sds,
+    x = xnames
+  ) %>% 
+    mutate(x = factor(x, levels = xnames)) %>% 
+    ggplot(mapping = aes(x = x)) +
+    geom_hline(yintercept = 0, color = 'grey', linetype = 'dashed') +
+    geom_point(mapping = aes(y = mu)) +
+    geom_linerange(mapping = aes(ymin = mu - 2 * sd,
+                                 ymax = mu + 2 * sd,
+                                 group = x)) +
+    labs(x = 'feature', y = 'coefficient value') +
+    coord_flip() 
+}
+```
+
+```{r}
+post_mode_H <- laplace_H$mode
+post_sd_H <- sqrt(diag(laplace_H$var_matrix))
+xnames_H <- colnames(Xmat_H)
+
+viz_post_coefs(post_mode_H, post_sd_H, xnames_H)
+```
+
+##Part iii: Classification – iiiC) GLM Predictions
+#C1:visualize the trends on a specifically designed prediction grid, defines a grid using the expand.grid() function
+```{r}
+viz_grid <- expand.grid(R = seq(-3, 3, length.out=6),
+                        G = seq(-2.5, 2.5, length.out=50),
+                        B = 0,
+                        Hue = 0,
+                        Lightness = unique(dfiiiA_standard$Lightness),
+                        Saturation = unique(dfiiiA_standard$Saturation),
+                        KEEP.OUT.ATTRS = FALSE, 
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+Generate random posterior samples of the unknown parameters from the Laplace Approximation assumed Multivariate Normal (MVN) distribution
+
+```{r}
+generate_glm_post_samples <- function(mvn_result, num_samples)
+{
+  length_beta <- length(mvn_result$mode)
+  beta_samples <- MASS::mvrnorm(n = num_samples,
+                                mu = mvn_result$mode,
+                                Sigma = mvn_result$var_matrix)
+  beta_samples %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(sprintf("beta_%02d", (1:length_beta) - 1))
+}
+```
+
+```{r}
+post_logistic_pred_samples <- function(Xnew, Bmat)
+{
+  eta_mat <- Xnew %*% t(Bmat)
+  mu_mat <- boot::inv.logit(eta_mat)
+  list(eta_mat = eta_mat, mu_mat = mu_mat)
+}
+```
+
+
+```{r}
+summarize_logistic_pred_from_laplace <- function(mvn_result, Xtest, num_samples)
+{
+  betas <- generate_glm_post_samples(mvn_result, num_samples)
+  betas <- as.matrix(betas)
+  # make posterior predictions on the test set
+  pred_test <- post_logistic_pred_samples(Xtest, betas)
+  # posterior mean
+  mu_avg <- rowMeans(pred_test$mu_mat)
+  # posterior quantiles
+  mu_q05 <- apply(pred_test$mu_mat, 1, stats::quantile, probs = 0.05)
+  mu_q95 <- apply(pred_test$mu_mat, 1, stats::quantile, probs = 0.95)
+  # book keeping
+  tibble::tibble(
+    mu_avg = mu_avg,
+    mu_q05 = mu_q05,
+    mu_q95 = mu_q95
+  ) %>% 
+    tibble::rowid_to_column("pred_id")
+}
+```
+
+```{r}
+Xviz_H <- model.matrix( ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), viz_grid)
+
+Xviz_I <- model.matrix( ~  Lightness + Saturation + R*G*B*Hue, viz_grid)
+
+Xviz_H %>% dim()
+```
+
+```{r}
+set.seed(1234) 
+
+post_pred_summary_H <- summarize_logistic_pred_from_laplace( laplace_H, Xviz_H, 2500)
+
+post_pred_summary_I <- summarize_logistic_pred_from_laplace( laplace_I, Xviz_I, 2500)
+```
+
+```{r}
+viz_bayes_logpost_preds <- function(post_pred_summary, input_df)
+{
+  post_pred_summary %>% 
+    left_join(input_df %>% tibble::rowid_to_column('pred_id'),
+              by = 'pred_id') %>% 
+    ggplot(mapping = aes(x = G)) +
+    geom_ribbon(mapping = aes(ymin = mu_q05,
+                              ymax = mu_q95,
+                              group = interaction(Saturation, R),
+                              fill = Saturation),
+                alpha = 0.25) +
+    geom_line(mapping = aes(y = mu_avg,
+                            group = interaction(Saturation, R),
+                            color = Saturation),
+              size = 0.75) +
+    facet_wrap( ~ R, labeller = 'label_both') +
+    labs(y = "event probability") 
+}
+```
+#Model H
+```{r}
+viz_bayes_logpost_preds(post_pred_summary_H, viz_grid)
+```
+#Model I
+```{r}
+viz_bayes_logpost_preds(post_pred_summary_I, viz_grid)
+```
+In Bayesian models, the predictive trends of 2 selected generalized linear models are not consistent.
+
+##Part iii: Classification – iiiD) Train/tune with resampling
+```{r}
+dfiiiD <- df %>% 
+  select(-response) %>% 
+  mutate(outcome = ifelse(outcome == 1, 'event', 'non_event'),
+         outcome = factor(outcome, levels = c('event', 'non_event')))
+
+dfiiiD %>% glimpse()
+```
+```{r}
+dfiiiD %>% pull(outcome) %>% levels()
+```
+
+```{r}
+my_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+my_metric <- 'Accuracy'
+```
+
+#Generalized linear models 
+All categorical and continuous inputs - linear additive features
+```{r}
+set.seed(1234)
+glm_A <- train(outcome ~ ., 
+              data = dfiiiD,
+              method = "glm",
+              family = binomial,
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl)
+
+glm_A %>% coefplot()
+```
+#Add categorical inputs to all main effect and all pairwise interactions of continuous inputs
+```{r}
+set.seed(1234)
+glm_B <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2, 
+              data = dfiiiD,
+              method = "glm",
+              family = binomial,
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl)
+```
+
+#the 2 models selected from iiiA) (if they are not one of the two above)
+```{r}
+set.seed(1234)
+glm_C <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), 
+              data = dfiiiD,
+              method = "glm",
+              family = binomial,
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl)
+```
+
+```{r}
+set.seed(1234)
+glm_D <- train(outcome ~ Lightness + Saturation + R*G*B*Hue, 
+              data = dfiiiD,
+              method = "glm",
+              family = binomial,
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl)
+```
+
+# Regularized regression with Elastic net
+```{r}
+set.seed(1234)
+enet_B_default <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2,
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl  )
+```
+
+```{r}
+default_grid_B <- enet_B_default$results$lambda
+alpha_seq <- seq(0.1, 1.0, by = .1)
+lambda_seq <- exp(seq(log(min(enet_B_default$results$lambda)),
+                          log(max(enet_B_default$results$lambda)),
+                          length.out = 25))
+
+enet_grid_B <- expand.grid(alpha = alpha_seq, lambda = lambda_seq)
+
+enet_grid_B %>% dim()
+```
+
+```{r}
+set.seed(1234)
+
+enet_tune_B <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2,
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl,
+                      tuneGrid = enet_grid_B )
+
+plot(enet_tune_B, xTrans = log)
+
+```
+
+```{r}
+enet_tune_B$bestTune
+```
+
+```{r}
+set.seed(1234)
+enet_C_default <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2),
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl  )
+```
+
+```{r}
+default_grid_C <- enet_C_default$results$lambda
+alpha_seq <- seq(0.1, 1.0, by = .1)
+lambda_seq <- exp(seq(log(min(enet_C_default$results$lambda)),
+                          log(max(enet_C_default$results$lambda)),
+                          length.out = 25))
+
+enet_grid_C <- expand.grid(alpha = alpha_seq, lambda = lambda_seq)
+```
+
+```{r}
+set.seed(1234)
+
+enet_tune_C <- train(outcome ~ (Lightness + Saturation) + ( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2),
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl,
+                      tuneGrid = enet_grid_C )
+
+plot(enet_tune_C, xTrans = log)
+```
+
+```{r}
+enet_tune_C$bestTune
+```
+```{r}
+set.seed(1234)
+enet_D_default <- train(outcome ~ Lightness + Saturation + R*G*B*Hue,
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl  )
+```
+
+```{r}
+default_grid_D <- enet_D_default$results$lambda
+alpha_seq <- seq(0.1, 1.0, by = .1)
+lambda_seq <- exp(seq(log(min(enet_D_default$results$lambda)),
+                          log(max(enet_D_default$results$lambda)),
+                          length.out = 25))
+
+enet_grid_D <- expand.grid(alpha = alpha_seq, lambda = lambda_seq)
+```
+
+```{r}
+set.seed(1234)
+
+enet_tune_D <- train(outcome ~ Lightness + Saturation + R*G*B*Hue,
+                      data = dfiiiD,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c('center', 'scale'),
+                      trControl = my_ctrl,
+                      tuneGrid = enet_grid_D )
+
+plot(enet_tune_D, xTrans = log)
+enet_tune_D$bestTune
+```
+
+#Neutral network
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+nnet_default <- caret::train( outcome ~ .,
+                              data = dfiiiD,
+                              method = 'nnet',
+                              metric = my_metric,
+                              preProcess = c('center', 'scale'),
+                              trControl = my_ctrl,
+                              trace = FALSE)
+```
+
+
+```{r}
+nnet_default$bestTune
+nnet_default
+```
+
+```{r}
+nnet_grid <- expand.grid( size = c(5,9,13,17,21), 
+                          decay = exp(seq(-6, 0, length.out = 11)))
+```
+
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+nnet_tune <- caret::train( outcome ~ .,
+                              data = dfiiiD,
+                              method = 'nnet',
+                              metric = my_metric,
+                              preProcess = c('center', 'scale'),
+                              trControl = my_ctrl,
+                              tuneGrid = nnet_grid,
+                              trace = FALSE)
+```
+
+```{r}
+nnet_tune %>% plot(xTrans = log)
+nnet_tune$bestTune
+```
+
+#Random Forest
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+rf_default <- caret::train( outcome ~ .,
+                            data = dfiiiD,
+                            method = "rf",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            importance = TRUE)
+```
+
+```{r}
+rf_default$results
+```
+
+```{r}
+rf_grid <- expand.grid(.mtry = (2:30))
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+rf_tune <- caret::train( outcome ~ .,
+                            data = dfiiiD,
+                            method = "rf",
+                            tuneGrid = rf_grid,
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            importance = TRUE)
+```
+
+```{r}
+rf_tune$bestTune
+```
+
+#Gradient boosted tree
+
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+xgb_default <- caret::train(outcome ~ .,
+                            data = dfiiiD,
+                            method = "xgbTree",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            verbosity = 0,
+                            nthread = 1  )
+
+xgb_default %>% plot()
+```
+refined tuning grid to improve the model
+```{r}
+xgb_grid <- expand.grid(nrounds = seq(20, 200, by = 20),
+                        max_depth = c(3, 6, 9, 12),
+                        eta = c(0.5, 1, 1.5) * xgb_default$bestTune$eta,
+                        gamma = xgb_default$bestTune$gamma,
+                        colsample_bytree = xgb_default$bestTune$colsample_bytree,
+                        min_child_weight = xgb_default$bestTune$min_child_weight,
+                        subsample = xgb_default$bestTune$subsample)
+```
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+xgb_tune <- caret::train(outcome ~ .,
+                            data = dfiiiD,
+                            method = "xgbTree",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            tuneGrid = xgb_grid,
+                            verbosity = 0,
+                            nthread = 1  )
+```
+
+```{r}
+xgb_tune %>% plot()
+```
+
+```{r}
+xgb_tune$bestTune
+```
+
+#SVM
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+svm_default <- caret::train( outcome ~ .,
+                        data = dfiiiD,
+                        method = "svmRadial",
+                        preProcess = c('center', 'scale'),
+                        trControl = my_ctrl,
+                        metric = my_metric)
+```
+
+```{r}
+svm_default %>% plot()
+```
+
+```{r}
+svm_grid = expand.grid(C=10^(1:2), scale=10^(-6:0), degree = c(2, 3, 4))
+
+set.seed(1234)
+registerDoParallel(cores=8)
+
+
+svm_tune <- train(outcome ~ .,
+                      data = dfiiiD,
+                      method = "svmPoly",
+                      metric = my_metric,
+                      tuneGrid = svm_grid,
+                      trControl = my_ctrl )
+
+
+svm_tune$bestTune
+
+svm_tune %>% plot()
+```
+#partial least squares（pls） model
+```{r}
+registerDoParallel(cores=8)
+
+set.seed(1234)
+
+pls_default <- caret::train( outcome ~ .,
+                        data = dfiiiD,
+                        method = "pls",
+                        preProcess = c('center', 'scale'),
+                        trControl = my_ctrl,
+                        metric = my_metric)
+```
+
+```{r}
+pls_default$results
+```
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+ncomp_values <- 1:10
+pls_grid <- expand.grid(ncomp = ncomp_values)
+
+pls_tune <- caret::train( outcome ~ .,
+                        data = dfiiiD,
+                        method = "pls",
+                        preProcess = c('center', 'scale'),
+                        trControl = my_ctrl,
+                        tuneGrid = pls_grid,
+                        metric = my_metric)
+
+pls_tune$bestTune
+```
+```{r}
+pls_tune$results
+```
+
+#Which model is the best if you are interested in maximizing Accuracy compared to maximizing the Area Under the ROC Curve (ROC AUC)?
+
+```{r}
+# Combine the resampling results
+caret_acc_compare <- resamples(list(
+    glm_A = glm_A,
+    glm_B = glm_B,
+    glm_C = glm_C,
+    glm_D = glm_D,
+    enet_B = enet_tune_B,
+    enet_C = enet_tune_C,
+    enet_D = enet_tune_D,
+    nnet_default = nnet_default,
+    nnet_tune = nnet_tune,
+    rf_default = rf_default,
+    rf_tune = rf_tune,
+    xgb_default = xgb_default,
+    xgb_tune = xgb_tune,
+    svm_default = svm_default,
+    svm_tune = svm_tune,
+    pls_tune = pls_tune
+))
+
+# Summary of models' performance based on Accuracy
+model_summaries <- summary(caret_acc_compare)
+accuracy_summary <- model_summaries$statistics$Accuracy
+
+print(accuracy_summary)
+
+# Visualization of Accuracy Across Models
+dotplot(caret_acc_compare, metric = "Accuracy")
+
+```
+ it appears that the model labeled "xgb_default" has the highest mean Accuracy as its dot is furthest to the right on the scale. It also has relatively narrow confidence intervals compared to other models with high accuracy, which suggests that the model is not only accurate but also consistent across different resamples.
+
+
+

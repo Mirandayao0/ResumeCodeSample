@@ -1,0 +1,1082 @@
+---
+title: "Final_Project_Part i+ Part ii"
+output: html_document
+date: "2023-12-10"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(dplyr)
+library(coefplot)
+library(gridExtra)
+library(tidyverse)
+library(iterators)
+library(caret)
+library(parallel)
+library(doParallel)
+```
+
+```{r read_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+## Part i: Exploration
+
+#1. Visualize the distributions of variables in the data set.
+
+#1.1 Counts for categorical variables.
+
+ans: Here we calculate the lightness variables and saturation
+separately, and we also calculate them into each pair with one lightness
+and saturation.
+
+```{r}
+counts_lightness <- df %>%
+  count(Lightness)
+counts_saturation <- df %>%
+  count(Saturation)
+counts_df <- df %>%
+  count(Lightness, Saturation)
+
+print(counts_lightness)
+print(counts_saturation)
+print(counts_df)
+```
+
+#1.2 Histograms or Density plots for continuous variables. Are the
+distributions Gaussian like?
+
+Acoording to the graphs below, they are not Gaussian like.
+
+```{r}
+ggplot(df, aes(x = response)) +
+  geom_density(fill = "lightblue", color = "darkblue", binwidth = 10) +
+  labs(title = "Density Plot of Response", x = "Response")
+```
+
+```{r}
+ggplot(df, aes(x = R)) +
+  geom_density(fill = "lightblue", color = "darkblue", binwidth = 10) +
+  labs(title = "Density Plot of R", x = "R")
+```
+
+```{r}
+ggplot(df, aes(x = G)) +
+  geom_density(fill = "lightblue", color = "darkblue", binwidth = 10) +
+  labs(title = "Density Plot of G", x = "G")
+```
+
+```{r}
+ggplot(df, aes(x = B)) +
+  geom_density(fill = "lightblue", color = "darkblue", binwidth = 10) +
+  labs(title = "Density Plot of B", x = "B")
+```
+
+```{r}
+ggplot(df, aes(x = Hue)) +
+  geom_density(fill = "lightblue", color = "darkblue", binwidth = 10) +
+  labs(title = "Density Plot of Hue", x = "Hue")
+```
+
+#2.Condition (group) the continuous variables based on the categorical
+variables. #2.1 Are there differences in continuous variable
+distributions and continuous variable summary statistics based on
+categorical variable values?
+
+```{r}
+library(reshape2)
+
+# 使用 melt 函數將 R, G, B 轉換為一個變數
+df_melted <- melt(df, id.vars = c("Lightness"), measure.vars = c("R", "G", "B"))
+
+# 繪製盒狀圖
+ggplot(df_melted, aes(x = Lightness, y = value, fill = variable)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of R, G, B Grouped by Lightness") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+# 使用ANOVA進行分組比較
+model_anova <- aov(R ~ Lightness, data = df)
+anova_result <- summary(model_anova)
+print(anova_result)
+
+```
+
+In your results, the p-value Pr(\>F) is less than 0.05 (common
+significance level), so we reject the null hypothesis. This implies that
+there is a statistically significant difference between different levels
+of Lightness.
+
+#2.2 Are there differences in continuous variable distributions and
+continuous variable summary statistics based on the binary outcome？
+
+```{r}
+summary(df$response)
+```
+
+```{r}
+# Summary statistics for 'response' based on 'outcome'
+summary(df$response[df$outcome == 1])  # Replace 1 with the actual code for the positive outcome
+summary(df$response[df$outcome == 0])  # Replace 0 with the actual code for the negative outcome
+
+```
+
+the first set of answers focuses on summarizing the overall distribution
+of a continuous variable, while the second set of answers explores how
+the distribution of the continuous variable differs based on a binary
+outcome variable. The second set of answers involves comparing the
+distribution of the continuous variable between different groups defined
+by the binary outcome.
+
+#3.Visualize the relationships between the continuous inputs, are they
+correlated?
+
+```{r}
+mod01 <- lm( response ~ R*G*B*Hue, data = df )
+```
+
+```{r}
+mod01%>% coefplot::coefplot()+
+  theme(legend.position = 'none')
+```
+
+As we see below all features are not statistically significant except
+Hue, because Hue doesn't contain zero.
+
+```{r}
+# 使用散點圖視覺化連續輸入變量之間的關係
+pairs(df[, c("R", "G", "B", "Hue")], pch = 16, col = "blue", main = "Scatterplot Matrix")
+```
+
+```{r}
+# 計算相關性矩陣
+cor_matrix <- cor(df[, c("R", "G", "B", "Hue")])
+
+# 視覺化相關性矩陣
+heatmap(cor_matrix, annot = TRUE, cmap = "Blues", main = "Correlation Matrix")
+
+```
+
+4.Visualize the relationships between the continuous outputs (response
+and the LOGIT-transformed response, y) with respect to the continuous
+INPUTS. 4.1Can you identify any clear trends? Do the trends depend on
+the categorical INPUTS?
+
+```{r, make_reg_data}
+dfii <- df %>% 
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>% 
+  select(R, G, B, 
+         Lightness, Saturation, Hue,
+         y)
+
+dfii %>% glimpse()
+```
+
+```{r}
+mod02 <- lm( y ~ R*G*B*Hue, data = dfii )
+mod02 %>% coefplot::coefplot()+
+  theme(legend.position = 'none')
+```
+
+5.How can you visualize the behavior of the binary outcome with respect
+to the continuous inputs? How can you visualize the behavior of the
+binary outcome with respect to the categorical INPUTS?
+
+```{r}
+library(reshape2)
+
+# 使用 melt 函數將 R, G, B 轉換為一個變數
+df_melted <- melt(df, id.vars = c("outcome"), measure.vars = c("R", "G", "B"))
+
+# 繪製盒狀圖
+ggplot(df_melted, aes(x = outcome, y = value, fill = variable)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of R, G, B Grouped by outcome") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+
+# Create a boxplot for the binary outcome with respect to Lightness and Saturation
+ggplot(df, aes(x = Lightness, y = response, fill = factor(outcome))) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Response with Respect to Lightness and Outcome", x = "Lightness", y = "Response", fill = "Outcome") +
+  facet_wrap(~ Saturation, scales = "free", ncol = 2)  # Facet by Saturation
+
+```
+
+## Part ii: Regression - iiA) Linear models
+
+Before using more advanced methods, you need to develop a baseline
+understanding for the behavior of the LOGIT-transformed response as a
+function of the inputs using linear modeling techniques.
+
+```{r}
+df_standard <- dfii
+# Standardization function
+standardize <- function(x) {
+  return ((x - mean(x)) / sd(x))
+}
+
+# Apply the function to the variables
+df_standard$R <- standardize(dfii$R)
+df_standard$G <- standardize(dfii$G)
+df_standard$B <- standardize(dfii$B)
+df_standard$Hue <- standardize(dfii$Hue)
+df_standard$y <- standardize(dfii$y)
+
+df_standard %>% glimpse()
+```
+
+Use lm() to fit linear models. You must use the following: #A1.
+Intercept-only model -- no INPUTS!
+
+```{r}
+data <- data.frame(logit_response = dfii$y)
+intercept_only_model <- lm(logit_response ~ 1, data = data)
+summary(intercept_only_model)
+```
+
+```{r}
+fit_lm_01 <- lm(y ~ 1, data =df_standard)
+
+fit_lm_01 %>% summary()
+```
+
+#A2. Categorical variables only -- linear additive
+
+```{r}
+fit_lm_02 <- lm(y ~ Lightness + Saturation, data = df_standard)
+
+fit_lm_02 %>% summary()
+
+```
+
+```{r}
+library(coefplot)
+```
+
+```{r}
+coefplot(fit_lm_02)
+```
+
+#A3. Continuous variables only -- linear additive
+
+```{r}
+fit_lm_03 <- lm(y ~ R + G + B + Hue, data = df_standard)
+coefplot(fit_lm_03)
+```
+
+#A4.All categorical and continuous variables -- linear additive
+
+```{r}
+fit_lm_04 <- lm(y ~ ., data = df_standard)
+coefplot(fit_lm_04)
+```
+
+#A5. Interaction of the categorical inputs with all continuous inputs
+main effects
+
+```{r}
+fit_lm_05 <- lm(y ~ (Lightness + Saturation) * (R + G + B + Hue), data = df_standard)
+coefplot(fit_lm_05)
+```
+
+#A6. Add categorical inputs to all main effect and all pairwise
+interactions of continuous inputs
+
+```{r}
+fit_lm_06 <- lm(y ~ Lightness + Saturation + (R + G + B + Hue)^2, data = df_standard)
+
+fit_lm_06 %>% summary()
+
+coefplot(fit_lm_06)
+```
+
+#A7. Interaction of the categorical inputs with all main effect and all
+pairwise interactions of continuous inputs
+
+```{r}
+fit_lm_07 <- lm(y ~ (Lightness + Saturation) * (R + G + B + Hue)^2, data = df_standard)
+coefplot(fit_lm_07)
+```
+
+#A8. 3 models with basis functions of your choice Try non-linear basis
+functions based on your EDA.
+
+```{r}
+fit_lm_08 <- lm(y ~ (Lightness + Saturation) * (( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2)), data = df_standard)
+fit_lm_08 %>% summary()
+```
+
+#A9. Can consider interactions of basis functions with other basis
+functions!
+
+```{r}
+fit_lm_09 <- lm(y ~ Lightness + Saturation + R*G*B*Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), data = df_standard)
+fit_lm_09 %>% summary()
+```
+
+#A10. Can consider interactions of basis functions with the categorical
+inputs!
+
+```{r}
+fit_lm_10 <- lm(y ~ (Lightness + Saturation) * R*G*B*Hue, data = df_standard)
+```
+
+##save model
+
+```{r}
+fit_lm_01 %>% readr::write_rds("mod01.rds")
+fit_lm_02 %>% readr::write_rds("mod02.rds")
+fit_lm_03 %>% readr::write_rds("mod03.rds")
+fit_lm_04 %>% readr::write_rds("mod04.rds")
+fit_lm_05 %>% readr::write_rds("mod05.rds")
+fit_lm_06 %>% readr::write_rds("mod06.rds")
+fit_lm_07 %>% readr::write_rds("mod07.rds")
+fit_lm_08 %>% readr::write_rds("mod08.rds")
+fit_lm_09 %>% readr::write_rds("mod09.rds")
+fit_lm_10 %>% readr::write_rds("mod10.rds")
+```
+
+##reload model
+
+```{r}
+re_load_mod01 <- readr::read_rds("mod01.rds")
+re_load_mod02 <- readr::read_rds("mod02.rds")
+re_load_mod03 <- readr::read_rds("mod03.rds")
+re_load_mod04 <- readr::read_rds("mod04.rds")
+re_load_mod05 <- readr::read_rds("mod05.rds")
+re_load_mod06 <- readr::read_rds("mod06.rds")
+re_load_mod07 <- readr::read_rds("mod07.rds")
+re_load_mod08 <- readr::read_rds("mod08.rds")
+re_load_mod09 <- readr::read_rds("mod09.rds")
+re_load_mod10 <- readr::read_rds("mod10.rds")
+```
+
+## Part ii: Regression - iiA) Linear models
+
+#1. Which of the 10 models is the best? What performance metric did you
+use to make your selection?
+
+```{r}
+extract_metrics <- function(mod, mod_name)
+{
+  broom::glance(mod) %>% mutate(mod_name = mod_name)
+}
+
+all_metrics <- purrr::map2_dfr(list(re_load_mod01, re_load_mod02, re_load_mod03, re_load_mod04, re_load_mod05, re_load_mod06, re_load_mod07, re_load_mod08, re_load_mod09, re_load_mod10),
+                               sprintf("%02d", 1:10),
+                               extract_metrics)
+all_metrics %>% glimpse()
+```
+
+#2. Visualize the coefficient summaries for your top 3 models.
+
+```{r}
+all_metrics %>% 
+  select(mod_name, AIC, BIC) %>% 
+  pivot_longer(c(AIC, BIC)) %>% 
+  ggplot(mapping = aes(x = mod_name, y = value)) +
+  geom_point(size = 2) +
+  facet_wrap(~name, scales = 'free_y') + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Based on the information provided, model 8 is selected as the optimal
+model by the less conservative Akaike Information Criterion (AIC), while
+the more conservative Bayesian Information Criterion (BIC) indicates
+that model 9 is preferable. Given that my evaluation criteria prioritize
+BIC as the performance metric, I conclude that model 9 is the superior
+model.
+
+#3. How do the coefficient summaries compare between the top 3 models?
+
+Model 9 considers the smallest set of features, whereas model 8
+incorporates the broadest range. Both models concur on the significance
+of certain features associated with G.
+
+• Which inputs seem important? In examining the summaries of models 9,
+8, and 5, it appears that the features related to the continuous
+variable G are of significance.
+
+```{r}
+re_load_mod09 %>% coefplot::coefplot()
+re_load_mod08 %>% coefplot::coefplot()
+re_load_mod05 %>% coefplot::coefplot()
+re_load_mod09 %>% summary()
+re_load_mod08 %>% summary()
+re_load_mod05 %>% summary()
+```
+
+## Part ii: Regression-- iiB) Bayesian Linear models
+
+You have explored the relationships; next you must consider the
+UNCERTAINTY on the residual error through Bayesian modeling techniques!
+#1.Fit 2 Bayesian linear models -- one must be the best model from iiA)
+： model 9 the second must be another model you fit in iiA): model 8 •
+State why you chose the second model. • You may use the Laplace
+Approximation approach we used in lecture and the homework assignments.
+• Alternatively, you may use rstanarm's stan_lm() or stan_glm() function
+to fit full Bayesian linear models with syntax like R's lm(). •
+Resources to help with rstanarm if you're interested: • How to Use the
+rstanarm Package (r-project.org) • Estimating Regularized Linear Models
+with rstanarm (r-project.org) • Extra examples also provided on Canvas.
+
+• After fitting the 2 models, you must identify the best model. • Which
+performance metric did you use to make your selection? • Visualize the
+regression coefficient posterior summary statistics for your best model.
+• For your best model: Study the posterior UNCERTAINTY on the likelihood
+noise (residual error), 𝜎. • How does the lm() maximum likelihood
+estimate (MLE) on 𝜎 relate to the posterior UNCERTAINTY on 𝜎? • Do you
+feel the posterior is precise or are we quite uncertain about 𝜎?
+
+```{r}
+Xmat_08 <- model.matrix(re_load_mod08, dfii)
+Xmat_09 <- model.matrix(re_load_mod09, dfii)
+```
+
+Create information with prior The info_09 list corresponds to the
+information for model 9, while info_08 corresponds to the information
+for model 08. Specify the shared prior mean, mu_beta, to be 0, the
+shared prior standard deviation, tau_beta, as 2. The prior rate
+parameter on the noise, sigma_rate, is assigned to 1.
+
+```{r}
+info_08 <- list(
+  yobs = df_standard$y,
+  design_matrix = Xmat_08,
+  mu_beta = 0,
+  tau_beta = 2,
+  sigma_rate = 1
+)
+
+info_09 <- list(
+  yobs = df_standard$y,
+  design_matrix = Xmat_09,
+  mu_beta = 0,
+  tau_beta = 2,
+  sigma_rate = 1
+)
+```
+
+Define the log-posterior function lm_logpost(). Use the
+log-transformation on σ, and so we will actually define the
+log-posterior in terms of the regression coefficients, β, and the
+unbounded noise parameter, φ=log[σ].
+
+```{r}
+lm_logpost <- function(unknowns, my_info)
+{
+ 
+  length_beta <- length(unknowns)-1
+  
+
+  beta_v <- unknowns[1:length_beta] %>% as.vector()
+  
+
+  lik_varphi <- unknowns[length(unknowns)]
+  
+
+  lik_sigma <- exp(lik_varphi)
+  
+ 
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- X %*% beta_v
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dnorm(x = my_info$yobs, mean = mu, sd = lik_sigma, log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(x = beta_v, mean = my_info$mu_beta, sd = my_info$tau_beta, log = TRUE))
+  
+  log_prior_sigma <- dexp(x = lik_sigma, rate = my_info$sigma_rate, log = TRUE)
+  
+  # add the mean trend prior and noise prior together
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the transformation
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  return(log_lik + log_prior + log_derive_adjust)
+}
+```
+
+The my_laplace() function is below
+
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+ 
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 1001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode) # number of unknown parameters
+  int <- p/2 * log(2*pi) + 0.5*log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+Fit the Bayesian linear model 08.
+
+```{r}
+init_guess <- rep(0, ncol(Xmat_08)+1)
+laplace_quad_08 <- my_laplace(init_guess, lm_logpost, info_08)
+
+laplace_quad_08$converge
+```
+
+```{r}
+laplace_quad_08$log_evidence
+```
+
+Display the posterior mode and posterior standard deviations
+
+```{r}
+cat("posterior mode: ", laplace_quad_08$mode, "\n\n")
+cat("posterior standard deviations: ", sqrt(diag(laplace_quad_08$var_matrix)))
+```
+
+Fit the Bayesian linear model 09
+
+```{r}
+init_guess <- rep(0, ncol(Xmat_09)+1)
+laplace_quad_09 <- my_laplace(init_guess, lm_logpost, info_09)
+
+laplace_quad_09$converge
+```
+
+```{r}
+laplace_quad_09$log_evidence
+```
+
+Display the posterior mode and posterior standard deviations
+
+```{r}
+cat("posterior mode: ", laplace_quad_09$mode, "\n\n")
+cat("posterior standard deviations: ", sqrt(diag(laplace_quad_09$var_matrix)))
+```
+
+Calculate the posterior model weight
+
+```{r}
+cat("log_evidence model 09: ", laplace_quad_09$log_evidence, "\n\n")
+cat("log_evidence model 08: ", laplace_quad_08$log_evidence, "\n\n")
+```
+
+Model 09 is the best one in Laplace Approximation approach, Residual
+standard error: 0.04481
+
+```{r}
+varphi_09 <- laplace_quad_09$mode[length(laplace_quad_09$mode)]
+cat("posterior UNCERTAINTY  model 09: ", exp(varphi_09), "\n")
+```
+
+posterior standard deviations: 0.02448401
+
+Since 0.04481 and 0.04396338 are close, and the standard deviations is
+quite large compared with posterior uncertainty, we could say that it is
+uncertain about the σ
+
+##Part ii: Regression -- iiC) Linear models Predictions
+
+```{r}
+viz_grid <- expand.grid(R = 0,
+                        G = seq(-3, 3, length.out=75),
+                        B = 0,
+                        Hue = seq(-2.5, 2.5, length.out=6),
+                        #Lightness = unique(df_standard$Lightness),
+                        Lightness = "dark",
+                        #Saturation = unique(df_standard$Saturation),
+                        Saturation = "gray",
+                        KEEP.OUT.ATTRS = FALSE, 
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+
+```{r}
+tidy_predict <- function(mod, xnew)
+{
+  pred_df <- predict(mod, xnew, interval = "confidence") %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    dplyr::select(pred = fit, ci_lwr = lwr, ci_upr = upr) %>% 
+    bind_cols(predict(mod, xnew, interval = 'prediction') %>% 
+                as.data.frame() %>% tibble::as_tibble() %>% 
+                dplyr::select(pred_lwr = lwr, pred_upr = upr))
+  
+  xnew %>% bind_cols(pred_df)
+}
+```
+
+#Use non-Bayesian models for the predictions Make predictions with each
+of the models
+
+```{r}
+pred_lm_09 <- tidy_predict(re_load_mod09, viz_grid)
+
+pred_lm_09 %>% glimpse()
+```
+
+visualization for each model's prediction
+
+```{r}
+pred_lm_09 %>% ggplot(aes(x = G)) + geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr), fill = 'blue') + geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr), fill = 'grey') +
+  geom_line(aes(y = pred)) + facet_wrap(~Hue) + 
+  labs(x = "pred_lm_09$x1")
+```
+
+```{r}
+pred_lm_08 <- tidy_predict(re_load_mod08, viz_grid)
+```
+
+compare the visualizations across models include a coord_cartesian()
+layer with the ylim argument set to c(-2,4)
+
+```{r}
+pred_lm_08 %>% ggplot(aes(x = G)) + geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr), fill = 'blue') + geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr), fill = 'grey') +
+  geom_line(aes(y = pred)) + facet_wrap(~Hue) + coord_cartesian(ylim = c(-2,4)) +
+  labs(x = "pred_lm_08$x1")
+```
+
+When R \< 2 ,the predictive trends are similar between the 2 selected
+linear models.When R \> 2, the predictive trends look different. The
+uncertainty of model 8 is big, showing that model 8 is over-fitting.
+
+##Part ii: Regression -- iiD) Train/tune with resampling • Linear
+models: • All categorical and continuous inputs - linear additive
+features • Add categorical inputs to all main effect and all pairwise
+interactions of continuous inputs • The 2 models selected from iiA) (if
+they are not one of the two above) • Regularized regression with Elastic
+net • Add categorical inputs to all main effect and all pairwise
+interactions of continuous inputs • The more complex of the 2 models
+selected from iiA) • Neural network • Random forest • Gradient boosted
+tree • 2 methods of your choice that we did not explicitly discuss in
+lecture You must use ALL categorical and continuous inputs with the
+non-linear methods
+
+#specify the resampling scheme and primary performance metric
+
+```{r}
+my_ctrl <- trainControl( method = "repeatedcv", number = 10, repeats = 3)
+
+my_metric <- 'RMSE'
+```
+
+You must train, assess, tune, and compare more complex methods
+
+```{r}
+train_lm_01 <- train(y ~ ., 
+                   data = dfii,
+                   method = "lm",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+```
+
+```{r}
+train_lm_02 <- train(y ~ Lightness + Saturation + (R + G + B + Hue)^2, 
+                   data = dfii,
+                   method = "lm",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+```
+
+```{r}
+train_lm_09 <- train(y ~ Lightness + Saturation + R*G*B*Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), 
+                   data = dfii,
+                   method = "lm",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+```
+
+```{r}
+train_lm_09$results
+```
+
+```{r}
+train_lm_09 %>% coefplot()
+```
+
+```{r}
+train_lm_08 <- train(y ~ (Lightness + Saturation) * (( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2)), 
+                   data = dfii,
+                   method = "lm",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+```
+
+```{r}
+train_lm_08$results
+```
+
+#Regularized regression with Elastic net Train, assess, and tune the
+glmnet elastic net model with the defined resampling scheme. Assign the
+result to the enet_default object and display the result to the screen.
+
+```{r}
+set.seed(1234)
+
+enet_default_01 <- caret::train(y ~ Lightness + Saturation + (R + G + B + Hue)^2, 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl)
+```
+
+Create a custom tuning grid to further tune the elastic net lambda and
+alpha tuning parameters.
+
+```{r}
+lambda_seq <- exp(seq(log(min(enet_default_01$results$lambda)),
+                          log(max(enet_default_01$results$lambda)),
+                          length.out = 25))
+
+enet_grid_01 <- expand.grid(alpha = seq(0.0, 0.15, by = .01), lambda = lambda_seq)
+```
+
+Train, assess, and tune the elastic net model with the custom tuning
+grid and assign the result to the enet_tune_01 object.
+
+```{r}
+set.seed(1234)
+
+enet_tune_01 <- caret::train(y ~ Lightness + Saturation + (R + G + B + Hue)^2, 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl,
+                             tuneGrid = enet_grid_01)
+enet_tune_01$bestTune
+```
+
+model 09
+
+```{r}
+set.seed(1234)
+
+enet_default_09 <- caret::train(y ~ Lightness + Saturation + R * G * B * Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl)
+
+enet_default_09$bestTune
+```
+
+```{r}
+lambda_seq <- exp(seq(log(min(enet_default_09$results$lambda)),
+                          log(max(enet_default_09$results$lambda)),
+                          length.out = 50))
+
+enet_grid_09 <- expand.grid(alpha = seq(0.03, 0.12, by = .01), lambda = lambda_seq)
+
+set.seed(1234)
+
+enet_tune_09 <- caret::train(y ~ Lightness + Saturation + R * G * B * Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2), 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl,
+                             tuneGrid = enet_grid_09)
+enet_tune_09$bestTune
+```
+
+model 08
+
+```{r}
+set.seed(1234)
+
+enet_default_08 <- caret::train(y ~ (Lightness + Saturation) * (( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2)), 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl)
+
+enet_default_08$bestTune
+
+lambda_seq <- exp(seq(log(min(enet_default_08$results$lambda)),
+                          log(max(enet_default_08$results$lambda)),
+                          length.out = 50))
+
+enet_grid_08 <- expand.grid(alpha = seq(0.03, 0.12, by = .01), lambda = lambda_seq)
+
+set.seed(1234)
+
+enet_tune_08 <- caret::train(y ~ (Lightness + Saturation) * (( R + G + B + Hue)^2 + I(R^2) + I(G^2) + I(B^2) + I(Hue^2)), 
+                             data = dfii,
+                             method = 'glmnet',
+                             metric = my_metric,
+                             preProcess = c('center', 'scale'),
+                             trControl = my_ctrl,
+                             tuneGrid = enet_grid_08)
+
+enet_tune_08$bestTune
+enet_tune_08$results
+```
+
+## Neural network
+
+```{r}
+set.seed(1234)
+
+nnet_default <- caret::train( y ~ .,
+                              data = dfii,
+                              method = 'nnet',
+                              metric = my_metric,
+                              preProcess = c('center', 'scale'),
+                              trControl = my_ctrl,
+                              trace = FALSE)
+
+nnet_default$bestTune
+
+nnet_grid <- expand.grid( size = c(5,9,13,17,21), 
+                          decay = exp(seq(-6, 0, length.out = 11)))
+
+set.seed(1234)
+
+nnet_tune <- caret::train( y ~ .,
+                            data = dfii,
+                            method = 'nnet',
+                            metric = my_metric,
+                            preProcess = c('center', 'scale'),
+                            trControl = my_ctrl,
+                            tuneGrid = nnet_grid,
+                            trace = FALSE)
+nnet_tune$bestTune
+plot(nnet_tune, xTrans=log)
+```
+
+## Random froest
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+rf_default <- caret::train( y ~ .,
+                            data = dfii,
+                            method = "rf",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            importance = TRUE)
+
+rf_default$bestTune
+
+```
+
+```{r}
+rf_default$results
+
+registerDoParallel(cores=8)
+set.seed(1234)
+
+rf_grid <- expand.grid(.mtry = (2:20))
+rf_tune <- caret::train( y ~ .,
+                            data = dfii,
+                            method = "rf",
+                            trControl = my_ctrl,
+                            tuneGrid = rf_grid,
+                            metric = my_metric,
+                            importance = TRUE)
+
+rf_tune$bestTune
+
+plot(rf_tune, xTrans=log)
+```
+
+## Gradient boosted tree
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+xgb_default <- caret::train(y ~ .,
+                            data = dfii,
+                            method = "xgbTree",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            verbosity = 0,
+                            nthread = 1  )
+```
+
+```{r}
+xgb_default$bestTune
+```
+
+```{r}
+plot(xgb_default)
+```
+
+```{r}
+xgb_grid <- expand.grid(nrounds = seq(100, 2500, by = 300),
+                        max_depth = c(3, 6, 9, 12),
+                        eta = c(0.125, 0.25, 0.5) * xgb_default$bestTune$eta,
+                        gamma = xgb_default$bestTune$gamma,
+                        colsample_bytree = xgb_default$bestTune$colsample_bytree,
+                        min_child_weight = xgb_default$bestTune$min_child_weight,
+                        subsample = xgb_default$bestTune$subsample)
+```
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+xgb_tune <- caret::train(   y ~ .,
+                            data = dfii,
+                            method = "xgbTree",
+                            trControl = my_ctrl,
+                            metric = my_metric,
+                            tuneGrid = xgb_grid,
+                            verbosity = 0,
+                            nthread = 1 )
+
+xgb_tune$bestTune
+
+```
+
+```{r}
+xgb_tune %>% plot()
+```
+
+#SVM
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+svm <- caret::train( y ~ .,
+                     data = dfii,
+                     method = "svmRadial",
+                     preProcess = c('center', 'scale'),
+                     trControl = my_ctrl,
+                     metric = my_metric)
+svm$results
+```
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+sigma_values <- c(0.01, 0.03, 0.1, 1)
+C_values <- c(0.25, 0.5, 1, 10, 100, 1000)
+# Create the tuning grid
+svm_grid <- expand.grid(sigma = sigma_values, C = C_values)
+
+svm_tune <- caret::train( y ~ .,
+                     data = dfii,
+                     method = "svmRadial",
+                     preProcess = c('center', 'scale'),
+                     trControl = my_ctrl,
+                     tuneGrid = svm_grid,
+                     metric = my_metric)
+
+svm_tune$bestTune
+```
+
+```{r}
+svm_tune$results
+```
+
+#PLS
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+
+pls <- caret::train( y ~ .,
+                        data = dfii,
+                        method = "pls",
+                        preProcess = c('center', 'scale'),
+                        trControl = my_ctrl,
+                        metric = my_metric)
+
+pls$results
+```
+
+```{r}
+registerDoParallel(cores=8)
+set.seed(1234)
+ncomp_values <- 1:10
+pls_grid <- expand.grid(ncomp = ncomp_values)
+
+pls_tune <- caret::train( y ~ .,
+                        data = dfii,
+                        method = "pls",
+                        preProcess = c('center', 'scale'),
+                        trControl = my_ctrl,
+                        tuneGrid = pls_grid,
+                        metric = my_metric)
+
+pls_tune$bestTune
+```
+
+```{r}
+pls_tune$results
+```
+
+```{r}
+caret_acc_compare <- resamples(list(lm_01 = train_lm_01,
+                                    lm_02 = train_lm_02,
+                                    lm_09 = train_lm_09,
+                                    lm_08 = train_lm_08,
+                                    enet_01 = enet_tune_01,
+                                    enet_09 = enet_tune_09,
+                                    enet_08 = enet_tune_08,
+                                    nnet_tune = nnet_tune,
+                                    rf_default = rf_default,
+                                    rf_tune = rf_tune,
+                                    xgb_default = xgb_default,
+                                    xgb_tune = xgb_tune,
+                                    svm_default = svm,
+                                    pls_default = pls,
+                                    pls_tune = pls_tune))
+```
+
+```{r}
+dotplot(caret_acc_compare, metric = 'RMSE')
+```
+
+According to this question, the model "lm_08" has the lowest RMSE, the
+model with the lowest RMSE is generally considered to be the best, as it
+indicates the closest fit to the observed data, so here model "lm_08" is
+the
